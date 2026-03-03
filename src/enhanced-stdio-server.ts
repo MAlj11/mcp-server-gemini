@@ -60,13 +60,24 @@ const GEMINI_MODELS = {
   }
 };
 
+// Default text model can be overridden via environment variable
+const GEMINI_DEFAULT_MODEL =
+  process.env.GEMINI_DEFAULT_MODEL || 'gemini-2.5-flash';
+
 class EnhancedStdioMCPServer {
   private genAI: GoogleGenAI;
   private conversations: Map<string, any[]> = new Map();
   
-  constructor(apiKey: string) {
+  private baseUrl?: string;
+  
+  constructor(apiKey: string, baseUrl?: string) {
     this.genAI = new GoogleGenAI({ apiKey });
+    this.baseUrl = baseUrl;
     this.setupStdioInterface();
+  }
+
+  private getRequestOptions() {
+    return this.baseUrl ? { baseUrl: this.baseUrl } : undefined;
   }
 
   private setupStdioInterface() {
@@ -203,7 +214,7 @@ class EnhancedStdioMCPServer {
               type: 'string',
               description: 'Specific Gemini model to use',
               enum: Object.keys(GEMINI_MODELS),
-              default: 'gemini-2.5-flash'
+              default: GEMINI_DEFAULT_MODEL
             },
             systemInstruction: {
               type: 'string',
@@ -316,7 +327,7 @@ class EnhancedStdioMCPServer {
               type: 'string',
               description: 'Model to use for token counting',
               enum: Object.keys(GEMINI_MODELS),
-              default: 'gemini-2.5-flash'
+              default: GEMINI_DEFAULT_MODEL
             }
           },
           required: ['text']
@@ -503,7 +514,7 @@ class EnhancedStdioMCPServer {
 
   private async generateText(id: any, args: any): Promise<MCPResponse> {
     try {
-      const model = args.model || 'gemini-2.5-flash';
+      const model = args.model || GEMINI_DEFAULT_MODEL;
       const modelInfo = GEMINI_MODELS[model as keyof typeof GEMINI_MODELS];
       
       if (!modelInfo) {
@@ -568,10 +579,14 @@ class EnhancedStdioMCPServer {
       }
 
       // Call the API using the new SDK format
-      const result = await this.genAI.models.generateContent({
+      const requestPayload = {
         model,
         ...requestBody
-      });
+      };
+      const result = await this.genAI.models.generateContent(
+        requestPayload,
+        this.getRequestOptions()
+      );
       const text = result.text || '';
 
       // Update conversation history if needed
@@ -659,16 +674,19 @@ class EnhancedStdioMCPServer {
         }
       }
 
-      const result = await this.genAI.models.generateContent({
-        model,
-        contents: [{
-          parts: [
-            { text: args.prompt },
-            imagePart
-          ],
-          role: 'user'
-        }]
-      });
+      const result = await this.genAI.models.generateContent(
+        {
+          model,
+          contents: [{
+            parts: [
+              { text: args.prompt },
+              imagePart
+            ],
+            role: 'user'
+          }]
+        },
+        this.getRequestOptions()
+      );
 
       const text = result.text || '';
 
@@ -699,15 +717,18 @@ class EnhancedStdioMCPServer {
     try {
       const model = args.model || 'gemini-2.5-flash';
       
-      const result = await this.genAI.models.countTokens({
-        model,
-        contents: [{
-          parts: [{
-            text: args.text
-          }],
-          role: 'user'
-        }]
-      });
+      const result = await this.genAI.models.countTokens(
+        {
+          model,
+          contents: [{
+            parts: [{
+              text: args.text
+            }],
+            role: 'user'
+          }]
+        },
+        this.getRequestOptions()
+      );
 
       return {
         jsonrpc: '2.0',
@@ -781,10 +802,13 @@ class EnhancedStdioMCPServer {
     try {
       const model = args.model || 'text-embedding-004';
       
-      const result = await this.genAI.models.embedContent({
-        model,
-        contents: args.text
-      });
+      const result = await this.genAI.models.embedContent(
+        {
+          model,
+          contents: args.text
+        },
+        this.getRequestOptions()
+      );
 
       return {
         jsonrpc: '2.0',
@@ -1239,4 +1263,6 @@ if (!apiKey) {
   process.exit(1);
 }
 
-new EnhancedStdioMCPServer(apiKey);
+const baseUrl = process.env.GEMINI_BASE_URL;
+
+new EnhancedStdioMCPServer(apiKey, baseUrl);
